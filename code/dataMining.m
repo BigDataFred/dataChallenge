@@ -51,10 +51,12 @@ for it = 1:length(files)
     end;
     bigD = [bigD;X];
 end;
+clear dat;
 
 %%
 M = str2double(bigD(:,1:end-1));
 tp = bigD(:,end);
+clear bigD;
 
 %%
 tpID = unique(tp);
@@ -70,7 +72,12 @@ seg = [1;find([0;diff(M(:,2))]==1);size(M,1)];
 %%
 C = {'r','y','g','c','b'};
 
-[n1,x1] = hist(lab,[1:length(tpID)]);
+dId = unique(M(:,1));
+n1 = [];
+for it = 1:length(dId)
+    dIx = find(M(:,1)==dId(it));
+    [n1(it,:),x1] = hist(lab(dIx),[1:length(tpID)]);
+end;
 [n2,x2] = hist(M(:,2),sort(unique(M(:,2))));
 figure;
 subplot(421);
@@ -126,7 +133,13 @@ ylabel('data samples x time point');
 xlim([1 length(unique(M(:,2)))]);
 
 subplot(425);
-bar(x1,n1);
+hold on;
+bar(x1,mean(n1,1));
+for it = 1:size(n1,1)
+    for jt = 1:size(n1,2)
+        plot(x1,n1(it,:),'ro');
+    end;
+end;
 ylabel('count');
 set(gca,'XTick',1:length(tpID));
 set(gca,'XTickLabel',tpID);
@@ -166,7 +179,7 @@ set(gca,'XTickLabelRotation',45);
 set(gca,'YTickLabel',tpID);
 %set(gca,'YTickLabelRotation',45);
 cb = colorbar;
-set(get(cb,'YLabel'),'String','probability');
+set(get(cb,'YLabel'),'String','Tranisition probability');
 
 subplot(428);
 segIx = find(sign([0;diff(M(:,3))])==-1);
@@ -233,7 +246,7 @@ bar(1:length(F),F);
 set(gca,'XTick',1:length(F));
 set(gca,'XTickLabel',hdr(3:end-1));
 set(gca,'XTickLabelRotation',45);
-ylabel('F-values');
+ylabel('F-value');
 
 subplot(233);
 [ix1,ix2] = ind2sub(size(R),find(R.*(p<0.05)>0.8));
@@ -255,7 +268,7 @@ for it = 1:length(C)
     set(h([it]),'FaceColor',C{it},'EdgeColor',C{it},'ShowBaseLine','off');
 end;
 
-selIx = [find(strcmp(hdr,'var2')) find(strcmp(hdr,'var3')) find(strcmp(hdr,'var4')) find(strcmp(hdr,'var5')) find(strcmp(hdr,'var7')) find(strcmp(hdr,'var8')) find(strcmp(hdr,'var9'))];
+selIx = [find(strcmp(hdr,'var4')) find(strcmp(hdr,'var5')) find(strcmp(hdr,'var7')) find(strcmp(hdr,'var8')) find(strcmp(hdr,'var9'))];
 h = [];
 h = plot(labId,m(:,selIx-2),'ks-','LineWidth',3);
 
@@ -266,16 +279,28 @@ ylabel('average');
 axis tight;
 
 subplot(234);
-[COEFF, SCORE] = pca(M(:,3:end-1));
+[COEFF, SCORE] = pca(M(:,[6:7 9:11]));
+[~,sIx] = sort(diag(COEFF));
+
+
 imagesc(COEFF);axis xy;caxis([-1 1]);
 set(gca,'XTick',1:size(COEFF,2));
 set(gca,'YTick',1:size(SCORE,2));
-set(gca,'YTickLabel',hdr(3:end-1));
+set(gca,'YTickLabel',hdr([6:7 9:11]));
 xlabel('PC #');
 cb = colorbar;
 set(get(cb,'YLabel'),'String','PC weights');
 
 subplot(235);
+hold on;
+for it = 1:length( labId )
+    ix = find(lab == labId(it));
+    plot(((SCORE(ix,1))),((SCORE(ix,2))),'o','Color',C{it});
+end;
+xlabel('PC1');ylabel('PC2');
+axis tight;
+
+subplot(236);
 hold on;
 labId = unique(lab);
 h = [];
@@ -285,176 +310,237 @@ for it = 1:length( labId )
 end;
 legend(h,'type1','type2','type3','type4','type5');
 xlabel('PC1');ylabel('PC2');zlabel('PC4');
-view([-166 7]);
+view([-197 38]);
 grid on;
+axis tight;
 
 %%
-X = [SCORE];
-n = size(X,1);
+selIx = [find(strcmp(hdr,'var4')) find(strcmp(hdr,'var5')) find(strcmp(hdr,'var7')) find(strcmp(hdr,'var8')) find(strcmp(hdr,'var9'))];
+
+P = zeros(length(labId),1);
+for it = 1:length(labId)
+    ix = find(lab == labId(it));
+    P(it) = length(ix)/length(lab);
+end;
+
+P2 = [length(find(lab==1)) length(find(lab~=1))]./length(lab);
+
+n = size(M,1);
 rIx = randperm(n);
 
-training = rIx(1:floor(n*0.8));
-rIx(ismember(rIx,training)) = [];
+trIx = rIx(1:floor(n*0.9));
+rIx(ismember(rIx,trIx)) = [];
 
 rIx = rIx(randperm(length(rIx)));
-crossv = rIx(1:floor(n*0.1));
-rIx(ismember(rIx,crossv)) = [];
+teIx = rIx(1:floor(n*0.1));
+rIx(ismember(rIx,teIx)) = [];
 
-rIx = rIx(randperm(length(rIx)));
-test = rIx(1:floor(n*0.1));
-rIx(ismember(rIx,test)) = [];
+%% linear discriminant       
+cnt = 0;
+errTr = zeros(length(5e3:5e2:length(trIx)),2);
+errCv = zeros(length(5e3:5e2:length(trIx)),2);
 
+for it = 5e3:5e2:length(trIx)
+    cnt = cnt+1;
+    
+    rIx = trIx(randperm(length(trIx)));
+    lIx = rIx(1:it);
+    
+    D1 = [];
+    D1 = fitcdiscr(SCORE(lIx,1:2),nominal(lab(lIx)==1),'DiscrimType','linear');
+    
+    D3 = [];
+    D3 = fitcdiscr(SCORE(lIx,1:2),nominal(lab(lIx)==1),'DiscrimType','quadratic');      
+    
+    errTr(cnt,1) = resubLoss(D1);    
+    errTr(cnt,2) = resubLoss(D3);
+    
+    cvmodel = crossval(D1,'Holdout',.1);
+    errCv(cnt,1) = kfoldLoss(cvmodel);
+    
+    cvmodel = crossval(D3,'Holdout',.1);
+    errCv(cnt,2) = kfoldLoss(cvmodel);
+
+end;
+
+%%
+figure;
+subplot(321);
+hold on;
+h = [];
+h(1)=plot(5e3:5e2:length(trIx),errTr(:,1),'b--');
+h(2)=plot(5e3:5e2:length(trIx),errCv(:,1),'r');
+legend(h,'Training','Validation');
+%ylim([0 1]);
+xlabel('Number of training samples');
+ylabel('Error');
+xlim([5e3 length(trIx)]);
+%ylim([.75 1]);
+title('Model 1: linear binary');
+ 
+subplot(322);
+hold on;
+h = [];
+h(1)=plot(5e3:5e2:length(trIx),errTr(:,2),'b--');
+h(2)=plot(5e3:5e2:length(trIx),errCv(:,2),'r');
+%ylim([0 1]);
+xlabel('Number of training samples');
+ylabel('Error');
+xlim([5e3 length(trIx)]);
+%ylim([.75 1]);
+title(['Model 2: quadratic binary']);
+
+subplot(323);
+hold on;
+plot(SCORE(lab~=1,1),SCORE(lab~=1,2),'bo');
+plot(SCORE(lab==1,1),SCORE(lab==1,2),'rx');
+K = D1.Coeffs(1,2).Const;
+L = D1.Coeffs(1,2).Linear;
+f = @(x1,x2) K + L(1)*x1 + L(2)*x2;
+h2 = ezplot(f,[min(SCORE(:,1)) max(SCORE(:,1)) min(SCORE(:,2)) max(SCORE(:,2)) ]);
+h2.Color = 'g';
+h2.LineWidth = 2;
+xlabel(gca,'PC1');
+ylabel(gca,'PC2');
+
+subplot(324);
+hold on;
+plot(SCORE(lab~=1,1),SCORE(lab~=1,2),'bo');
+plot(SCORE(lab==1,1),SCORE(lab==1,2),'rx');
+K = D3.Coeffs(1,2).Const;
+L = D3.Coeffs(1,2).Linear;
+Q = D3.Coeffs(1,2).Quadratic;
+
+f = @(x1,x2) K + L(1)*x1 + L(2)*x2 + Q(1,1)*x1.^2 + ...
+    (Q(1,2)+Q(2,1))*x1.*x2 + Q(2,2)*x2.^2;
+h2 = ezplot(f,[min(SCORE(:,1)) max(SCORE(:,1)) min(SCORE(:,2)) max(SCORE(:,2)) ]);
+h2.Color = 'g';
+h2.LineWidth = 2;
+xlabel(gca,'PC1');
+ylabel(gca,'PC2');
+
+subplot(325);
+R1 = confusionmat(D1.Y,resubPredict(D1));
+R2 = confusionmat(D3.Y,resubPredict(D3));
+R3 = confusionmat(nominal(lab(teIx)==1),predict(D1,SCORE(teIx,1:2)));
+R4 = confusionmat(nominal(lab(teIx)==1),predict(D3,SCORE(teIx,1:2)));
+
+fp1 = R1(2,1)/sum(R1(2,:));
+tp1 = R1(1,1)/sum(R1(1,:));
+fp2 = R2(2,1)/sum(R2(2,:));
+tp2 = R2(1,1)/sum(R2(1,:));
+fp3 = R3(2,1)/sum(R3(2,:));
+tp3 = R3(1,1)/sum(R3(1,:));
+fp4 = R4(2,1)/sum(R4(2,:));
+tp4 = R4(1,1)/sum(R4(1,:));
+
+hold on;
+plot(fp1,tp1,'bx','LineWidth',3);
+plot(fp2,tp2,'rx','LineWidth',3);
+plot(fp3,tp3,'bo','LineWidth',3,'MarkerSize',8);
+plot(fp4,tp4,'ro','LineWidth',3,'MarkerSize',8);
+plot([0 1],[0 1]);
+xlabel(gca,'False positive rate');
+ylabel(gca,'True positive rate');
+
+clear D1 D3 R1 R2;
+
+%% multiclass support vector machine
+t = templateSVM('Standardize',1,'KernelFunction','rbf');
+options = statset('UseParallel',true);
+
+errTr = [];
+errCv = [];
+cnt = 0;
+for it = 5e3:5e2:length(trIx)
+    
+    cnt = cnt+1;
+    rIx = trIx(randperm(length(trIx)));
+    lIx = rIx(1:it);
+    
+    svm = fitcecoc(SCORE(lIx,1:2),tp(lIx),'Learners',t,'FitPosterior',1,...
+        'ClassNames',tpID,'Verbose',2,'Options',options);
+    
+    errTr(cnt) = resubLoss(svm);
+    cvmodel = crossval(svm,'Holdout',.1);
+    errCv(cnt) = kfoldLoss(cvmodel);
+end;
+
+[label,~,~,Posterior] = resubPredict(svm,'Verbose',1);
+
+
+xMax = max(SCORE(:,1:2));
+xMin = min(SCORE(:,1:2));
+
+x1Pts = linspace(xMin(1),xMax(1));
+x2Pts = linspace(xMin(2),xMax(2));
+[x1Grid,x2Grid] = meshgrid(x1Pts,x2Pts);
+
+[~,~,~,PosteriorRegion] = predict(svm,[x1Grid(:),x2Grid(:)]);
+
+%%
 figure;
 subplot(221);
 hold on;
-
-errRate = [];
-pcIx =[];
-for jt = 1:size(X,2)
-    pcIx = [pcIx jt]
-    for it = 1:5
-        
-        Y = nominal(ismember(lab,labId(it)));
-        D = [];
-        D = fitcdiscr(X(training,pcIx),Y(training),'DiscrimType','diagLinear','HyperparameterOptimizationOptions',struct('Optimizer','randomsearch','Prior','bayesopt'));
-        
-        CM1 = confusionmat(Y(crossv),predict(D,X(crossv,pcIx)));
-        
-        errRate(jt,it) = sum(Y(crossv)~= predict(D,X(crossv,pcIx)))/length(crossv);
-    end;
-    
-end;
-hold on;
-contour(errRate);
-plot(1:length(tpID),5*ones(1,length(tpID)),'r--');
-axis xy;
-set(gca,'YTick',1:size(X,2));
-set(gca,'XTick',1:length(tpID));
-
-ylabel('number of PCs included');
-xlabel('type');
-
-cb = colorbar;
-set(get(cb,'YLabel'),'String','Test-error (%)');
+plot(5e3:5e2:length(trIx),errTr,'b--');
+plot(5e3:5e2:length(trIx),errCv,'r');
+xlabel('Number of training samples');
+ylabel('Error');
 
 subplot(222);
-pcIx = 1:5;
-hold on;
-perfCV = [];perfTE = [];
-D = {};
-for it = 1:5
-    
-    Y = nominal(ismember(lab,labId(it)));
-    
-    D{it} = fitcdiscr(X(training,pcIx),Y(training),'DiscrimType','diagLinear','HyperparameterOptimizationOptions',struct('Optimizer','randomsearch','Prior','bayesopt'));
-    
-%     CM1 = confusionmat(Y(crossv),predict(D{it},X(crossv,pcIx)));
-%     perfCV(it,:) = CM1(:)./length(crossv);
-    CM2 = confusionmat(Y(test),predict(D{it},X(test,pcIx)));
-    perfTE(it,:) = CM2(:)./length(test);
-    
-end;
+contourf(x1Grid,x2Grid,...
+        reshape(max(PosteriorRegion,[],2),size(x1Grid,1),size(x1Grid,2)));
 
-h = [];
-for it = 1:size(perfTE,1)    
-    %plot(perfCV(it,2),perfCV(it,1),'o','Color',C{it},'MarkerSize',8);
-    h(it) = plot(perfTE(it,2),perfTE(it,1),'o','Color',C{it},'MarkerSize',16);
+colormap bone;
+h = colorbar;
+h.YLabel.String = 'Maximum posterior';
+h.YLabel.FontSize = 15;
+hold on
+gh = gscatter(SCORE(teIx,1),SCORE(teIx,2),lab(teIx),'rygcb','o',8);
+gh(2).LineWidth = 2;
+gh(3).LineWidth = 2;
+
+title 'Test data and Maximum Posterior';
+xlabel 'PC1';
+ylabel 'PC2';
+axis tight
+legend(gh,'Location','NorthWest')
+hold off
+
+subplot(223);
+R1 = confusionmat(svm.Y,resubPredict(svm));
+R2 = confusionmat(tp(teIx),predict(svm,SCORE(teIx,1:2)));
+tp1 = diag(R1)./sum(R1,2);
+fp1 = zeros(size(R1,1),1);
+for it = 1:size(R1,2)
+    ix = setdiff(1:size(R1,1),it);
+    fp1(it) = sum(R1(ix,it))./sum(R1(:,it));
 end;
-legend(h,tpID);
-title('Naive bayesian classifier');
-ylabel('True positives (%)');
-xlabel('False positives (%)');
+tp2 = diag(R2)./sum(R2,2);
+fp2 = zeros(size(R2,1),1);
+for it = 1:size(R2,2)
+    ix = setdiff(1:size(R2,1),it);
+    fp2(it) = sum(R2(ix,it))./sum(R2(:,it));
+end;
+hold on;
+for it = 1:length(tp1)
+    plot(fp1(it),tp1(it),'x','Color',C{it},'LineWidth',3);
+    plot(fp2(it),tp2(it),'o','Color',C{it},'LineWidth',3,'MarkerSize',12);
+end;
+plot([0 1],[0 1]);
+xlabel(gca,'False positive rate');
+ylabel(gca,'True positive rate');
 
 %%
-x =M(:,selIx);
+tTree = templateTree('surrogate','off');
+tEnsemble = templateEnsemble('RUSBoost',300,tTree);
 
-for it = 1:size(x,2)
-    x(:,it) = (x(:,it)-mean(x(:,it)))./std(x(:,it));
-end;
-
-figure;
-subplot(211);
-hold on;
-h = [];
-h = plot(M(:,2),x);
-legend(h,hdr(selIx));
-plot(M([1 size(M,1)],2),[-4 -4],'Color',[.75 .75 .75]);
-plot(M([1 size(M,1)],2),[4 4],'Color',[.75 .75 .75]);
-plot(M(find(x(:,5)>4),2),x(find(x(:,5)>4),5),'ro');
-%xlim([15000 17000]);
-ylim([min(min(x))-1 max(max(x))+1]);
-ylabel('z-score');
-xlabel('data samples');
-subplot(212);
-hold on;
-plot(M(:,2),M(:,end));
-for it = 1:length(labId)
-    plot(M(find(lab==labId(it)),2),M(find(lab==labId(it)),end),'o','Color',C{it});
-end;
-ylim([0 6]);
-%xlim([15000 17000]);
-xlabel('data samples');
-ylabel('type');
-
-%%
-figure;
-h = [];
-for it = 1:length(labId)
-    
-    subplot(331);
-    hold on;
-    ix = find(lab == labId(it) );    
-    h(it) = plot(x(ix,1),x(ix,2),'o','Color',C{it});
-    xlabel(hdr(selIx(1)));
-    ylabel(hdr(selIx(2)));
-    subplot(332);
-    hold on;
-    ix = find(lab == labId(it) );    
-    h(it) = plot(x(ix,3),x(ix,4),'o','Color',C{it});
-    xlabel(hdr(selIx(3)));
-    ylabel(hdr(selIx(4)));
-    subplot(333);
-    hold on;
-    ix = find(lab == labId(it) );    
-    h(it) = plot(x(ix,6),x(ix,7),'o','Color',C{it});
-    xlabel(hdr(selIx(6)));
-    ylabel(hdr(selIx(7)));
-    subplot(334);
-    hold on;
-    ix = find(lab == labId(it) );    
-    h(it) = plot(x(ix,3),x(ix,6),'o','Color',C{it});
-    xlabel(hdr(selIx(3)));
-    ylabel(hdr(selIx(6)));
-    subplot(335);
-    hold on;
-    ix = find(lab == labId(it) );    
-    h(it) = plot(x(ix,3),x(ix,7),'o','Color',C{it});
-    xlabel(hdr(selIx(3)));
-    ylabel(hdr(selIx(7)));
-    subplot(337);
-    hold on;
-    ix = find(lab == labId(it) );    
-    h(it) = plot(x(ix,4),x(ix,6),'o','Color',C{it});
-    xlabel(hdr(selIx(4)));
-    ylabel(hdr(selIx(6)));
-    subplot(338);
-    hold on;
-    ix = find(lab == labId(it) );    
-    h(it) = plot(x(ix,4),x(ix,7),'o','Color',C{it});
-    xlabel(hdr(selIx(4)));
-    ylabel(hdr(selIx(7)));
-end;
-legend(h,tpID);
-
-
-
-
-
-
-
-
-
-
-
-
+pool = parpool; % Invoke workers
+options = statset('UseParallel',true);
+Mdl = fitcecoc(SCORE(trIx,1:2),tp(trIx),'Coding','onevsall','Learners',tEnsemble,...
+                'Prior','uniform','Options',options);
+         
+cv = crossval(Mdl,'Options',options);
+yhat = kfoldPredict(cv,'Options',options);
+ConfMat = confusionmat(tp(trIx),yhat);
 
